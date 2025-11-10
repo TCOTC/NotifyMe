@@ -1,0 +1,34 @@
+build/bin
+node_modules
+frontend/dist
+config.json
+
+# 编译产物
+*.exe
+*.dll
+*.so
+*.dylib
+
+
+# 构建工具生成的文件
+frontend/package.json.md5
+frontend/wailsjs
+
+# 临时文件和缓存
+*.tmp
+*.cache
+*.log
+*.swp
+*.bak
+*~
+
+# IDE 文件
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+desktop.ini

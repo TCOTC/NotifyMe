@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NotifyMe</title>
+    <link rel="stylesheet" href="src/style.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>NotifyMe</h1>
+            <p class="subtitle">消息通知管理</p>
+        </header>
+
+        <main>
+            <div class="left-column">
+                <section class="status-section">
+                    <h2>应用状态</h2>
+                    <div class="status-card">
+                        <div class="status-item">
+                            <span class="label">下次检查:</span>
+                            <span id="running-status" class="value">-</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">轮询间隔:</span>
+                            <span id="poll-interval" class="value">-</span>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="notifications-section">
+                    <h2>最近通知</h2>
+                    <div id="notifications-list" class="notifications-list">
+                        <div class="notification-empty">暂无通知</div>
+                    </div>
+                </section>
+            </div>
+
+            <section class="config-section">
+                <h2>配置</h2>
+                <div class="config-card">
+                    <div class="form-group">
+                        <label for="poll-interval-input">轮询间隔（秒）:</label>
+                        <input type="number" id="poll-interval-input" min="10" value="60">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="log-level-select">日志级别:</label>
+                        <select id="log-level-select">
+                            <option value="debug">Debug</option>
+                            <option value="info">Info</option>
+                            <option value="warn">Warn</option>
+                            <option value="error">Error</option>
+                        </select>
+                    </div>
+
+                    <h3>GitHub 配置</h3>
+                    <div class="form-group">
+                        <label for="github-token">Personal Access Token:</label>
+                        <input type="password" id="github-token" placeholder="输入 GitHub Personal Access Token">
+                        <p>
+                            在 <a href="https://github.com/settings/tokens" target="_blank">GitHub Settings → Developer settings → Personal access tokens</a> 中创建 Token，需要 <code>notifications</code> 权限
+                        </p>
+                    </div>
+
+                    <h3>ld246 配置</h3>
+                    <div class="form-group">
+                        <label for="ld246-token">Token:</label>
+                        <input type="password" id="ld246-token" placeholder="输入 ld246 Token">
+                        <p>
+                            在 <a href="https://ld246.com/settings/account" target="_blank">ld246 设置 - 账号页面</a> 中获取 API Token
+                        </p>
+                    </div>
+
+                    <div class="form-actions">
+                        <button id="save-btn" class="btn btn-primary">保存配置</button>
+                        <button id="refresh-btn" class="btn btn-secondary">刷新状态</button>
+                        <button id="check-btn" class="btn btn-secondary">立即检查</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="wailsjs/runtime/runtime.js"></script>
+    <script src="src/main.js"></script>
+</body>
+</html>
