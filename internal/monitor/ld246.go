@@ -356,12 +356,20 @@ func (m *Ld246Monitor) FetchRecentReplies() ([]*types.Notification, error) {
 
 		// 构建通知标题
 		title := item.ArticleTitle
-		if exists && (timeValue > seenState.LastUpdateTime || item.ArticleCommentCount > seenState.CommentCount) {
+		hasNewReply := exists && (timeValue > seenState.LastUpdateTime || item.ArticleCommentCount > seenState.CommentCount)
+		if hasNewReply {
 			title = fmt.Sprintf("有新回帖: %s", item.ArticleTitle)
 		}
 
+		// 生成通知 ID：如果是新回帖，在 ID 中包含更新时间戳，确保每次新回帖都会生成新的通知 ID
+		notificationID := fmt.Sprintf("ld246_article_%s", item.OID)
+		if hasNewReply {
+			// 有新回帖时，使用更新时间戳生成新的通知 ID，确保每次新回帖都会触发通知
+			notificationID = fmt.Sprintf("ld246_article_%s_%d", item.OID, timeValue)
+		}
+
 		notification := &types.Notification{
-			ID:      fmt.Sprintf("ld246_article_%s", item.OID),
+			ID:      notificationID,
 			Title:   title,
 			Content: content,
 			Link:    fmt.Sprintf("%s/article/%s", m.baseURL, item.OID),
