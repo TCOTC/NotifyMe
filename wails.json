@@ -9,5 +9,12 @@
   "author": {
     "name": "Jeffrey Chen",
     "email": "78434827+TCOTC@users.noreply.github.com"
+  },
+  "info": {
+    "productVersion": "1.0.0",
+    "productName": "NotifyMe",
+    "companyName": "Jeffrey Chen",
+    "copyright": "Copyright © 2025 Jeffrey Chen",
+    "comments": "一个基于 Wails 框架开发的消息通知管理应用"
   }
 }
