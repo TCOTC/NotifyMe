@@ -330,11 +330,17 @@ func (m *Ld246Monitor) FetchRecentReplies() ([]*types.Notification, error) {
 			// 检查是否有新回帖（更新时间或评论数变化）
 			if timeValue > seenState.LastUpdateTime || item.ArticleCommentCount > seenState.CommentCount {
 				isNew = true
-				updatedArticleCount++
-				logger.Debugf("ld246: 发现帖子有新回帖 ID=%s, 标题=%s, 更新时间变化=%v, 评论数变化=%v",
-					item.OID, item.ArticleTitle,
-					timeValue > seenState.LastUpdateTime,
-					item.ArticleCommentCount > seenState.CommentCount)
+				// 如果回帖数为 0，说明是新帖子，而不是"有新回帖"
+				if item.ArticleCommentCount == 0 {
+					newArticleCount++
+					logger.Debugf("ld246: 发现新帖子（回帖数为 0）ID=%s, 标题=%s", item.OID, item.ArticleTitle)
+				} else {
+					updatedArticleCount++
+					logger.Debugf("ld246: 发现帖子有新回帖 ID=%s, 标题=%s, 更新时间变化=%v, 评论数变化=%v",
+						item.OID, item.ArticleTitle,
+						timeValue > seenState.LastUpdateTime,
+						item.ArticleCommentCount > seenState.CommentCount)
+				}
 			} else {
 				logger.Debugf("ld246: 帖子无变化，跳过 ID=%s, 标题=%s, 当前时间=%d, 已记录时间=%d, 当前评论数=%d, 已记录评论数=%d",
 					item.OID, item.ArticleTitle,
@@ -356,9 +362,13 @@ func (m *Ld246Monitor) FetchRecentReplies() ([]*types.Notification, error) {
 
 		// 构建通知标题
 		title := item.ArticleTitle
-		hasNewReply := exists && (timeValue > seenState.LastUpdateTime || item.ArticleCommentCount > seenState.CommentCount)
-		if hasNewReply {
-			title = fmt.Sprintf("有新回帖: %s", item.ArticleTitle)
+		// 如果回帖数为 0，说明是新帖子，而不是"有新回帖"
+		isNewPost := !exists || (exists && item.ArticleCommentCount == 0)
+		hasNewReply := exists && item.ArticleCommentCount > 0 && (timeValue > seenState.LastUpdateTime || item.ArticleCommentCount > seenState.CommentCount)
+		if isNewPost {
+			title = fmt.Sprintf("新帖: %s", item.ArticleTitle)
+		} else if hasNewReply {
+			title = fmt.Sprintf("回帖: %s", item.ArticleTitle)
 		}
 
 		// 生成通知 ID：如果是新回帖，在 ID 中包含更新时间戳，确保每次新回帖都会生成新的通知 ID
@@ -511,11 +521,12 @@ func (m *Ld246Monitor) FetchUnreadMessages() ([]*types.Notification, error) {
 		return nil, fmt.Errorf("API 返回错误: %s", countResp.Msg)
 	}
 
-	logger.Infof("ld246 未读消息计数详情: 总未读=%d, 收到的回帖=%d, 提及我的=%d, 收到的回复=%d, 聊天=%d, 我关注的=%d",
+	logger.Infof("ld246 未读消息计数详情: 总未读=%d, 收到的回帖=%d, 提及我的=%d, 收到的回复=%d, 收到的评论=%d, 聊天=%d, 我关注的=%d",
 		countResp.Data.UnreadNotificationCnt,
 		countResp.Data.UnreadCommentedNotificationCnt,
 		countResp.Data.UnreadAtNotificationCnt,
 		countResp.Data.UnreadReplyNotificationCnt,
+		countResp.Data.UnreadComment2edNotificationCnt,
 		countResp.Data.UnreadChatNotificationCnt,
 		countResp.Data.UnreadFollowingNotificationCnt)
 
@@ -576,6 +587,20 @@ func (m *Ld246Monitor) FetchUnreadMessages() ([]*types.Notification, error) {
 		}
 	}
 
+	// 获取收到的评论消息（comment2ed API 的数据结构与其他通知类型不同，需要单独处理）
+	if countResp.Data.UnreadComment2edNotificationCnt > 0 {
+		logger.Infof("开始获取 ld246 收到的评论消息（未读数量: %d）...", countResp.Data.UnreadComment2edNotificationCnt)
+		comment2edNotifications, err := m.fetchComment2edNotifications()
+		if err != nil {
+			logger.Errorf("获取收到的评论消息失败: %v", err)
+		} else {
+			logger.Infof("ld246 收到的评论消息: 获取到 %d 条新消息", len(comment2edNotifications))
+			notifications = append(notifications, comment2edNotifications...)
+		}
+	} else {
+		logger.Debugf("ld246 收到的评论消息未读数量为 0，跳过获取")
+	}
+
 	// 处理聊天消息（根据未读数量生成通知，不通过 API 获取详情）
 	currentCount := countResp.Data.UnreadChatNotificationCnt
 
@@ -596,12 +621,13 @@ func (m *Ld246Monitor) FetchUnreadMessages() ([]*types.Notification, error) {
 		logger.Debugf("ld246 聊天消息: 生成 %d 条聊天消息通知", currentCount)
 	}
 
-	logger.Infof("ld246: 总共获取到 %d 条新未读消息（总未读=%d: 收到的回帖=%d, 提及我的=%d, 收到的回复=%d, 我关注的=%d, 聊天=%d）",
+	logger.Infof("ld246: 总共获取到 %d 条新未读消息（总未读=%d: 收到的回帖=%d, 提及我的=%d, 收到的回复=%d, 收到的评论=%d, 我关注的=%d, 聊天=%d）",
 		len(notifications),
 		countResp.Data.UnreadNotificationCnt,
 		countResp.Data.UnreadCommentedNotificationCnt,
 		countResp.Data.UnreadAtNotificationCnt,
 		countResp.Data.UnreadReplyNotificationCnt,
+		countResp.Data.UnreadComment2edNotificationCnt,
 		countResp.Data.UnreadFollowingNotificationCnt,
 		countResp.Data.UnreadChatNotificationCnt)
 	return notifications, nil
@@ -671,12 +697,12 @@ func (m *Ld246Monitor) fetchNotificationsByType(notificationType string) ([]*typ
 		return nil, fmt.Errorf("API 返回错误: %s", apiResp.Msg)
 	}
 
-	logger.Debugf("ld246 %s 通知: API 返回 %d 条消息", notificationType, len(apiResp.Data))
+	logger.Infof("ld246 %s 通知: API 返回 %d 条消息", notificationType, len(apiResp.Data))
 
 	// 对比已见过的消息，只返回新的未读消息
 	m.seenMessagesMu.RLock()
 	seenCount := len(m.seenMessages)
-	logger.Debugf("ld246 %s 通知: 当前已见过 %d 条消息", notificationType, seenCount)
+	logger.Infof("ld246 %s 通知: 当前已见过 %d 条消息", notificationType, seenCount)
 
 	newNotifications := make([]*types.Notification, 0)
 	newMessageIDs := make([]string, 0)
@@ -684,13 +710,13 @@ func (m *Ld246Monitor) fetchNotificationsByType(notificationType string) ([]*typ
 	seenMessageCount := 0
 
 	for i, item := range apiResp.Data {
-		logger.Debugf("ld246 %s 通知: 处理第 %d 条消息，ID=%s, HasRead=%v, Msg=%s",
+		logger.Infof("ld246 %s 通知: 处理第 %d 条消息，ID=%s, HasRead=%v, Msg=%s",
 			notificationType, i+1, item.ID, item.HasRead, truncateString(item.Msg, 50))
 
 		// 只处理未读消息
 		if item.HasRead {
 			readCount++
-			logger.Debugf("ld246 %s 通知: 消息 ID=%s 已读，跳过", notificationType, item.ID)
+			logger.Infof("ld246 %s 通知: 消息 ID=%s 已读，跳过", notificationType, item.ID)
 			continue
 		}
 
@@ -698,12 +724,12 @@ func (m *Ld246Monitor) fetchNotificationsByType(notificationType string) ([]*typ
 		messageID := fmt.Sprintf("%s_%s", notificationType, item.ID)
 		if m.seenMessages[messageID] {
 			seenMessageCount++
-			logger.Debugf("ld246 %s 通知: 消息 ID=%s (messageID=%s) 已见过，跳过",
+			logger.Infof("ld246 %s 通知: 消息 ID=%s (messageID=%s) 已见过，跳过",
 				notificationType, item.ID, messageID)
 			continue
 		}
 
-		logger.Debugf("ld246 %s 通知: 发现新消息 ID=%s (messageID=%s)",
+		logger.Infof("ld246 %s 通知: 发现新消息 ID=%s (messageID=%s)",
 			notificationType, item.ID, messageID)
 
 		// 限制内容长度
@@ -717,6 +743,8 @@ func (m *Ld246Monitor) fetchNotificationsByType(notificationType string) ([]*typ
 			title = "提及我的"
 		} else if notificationType == "reply" {
 			title = "收到回复"
+		} else if notificationType == "comment2ed" {
+			title = "收到评论"
 		} else if notificationType == "following" {
 			title = "我关注的"
 		} else if notificationType == "chat" {
@@ -765,12 +793,182 @@ func (m *Ld246Monitor) fetchNotificationsByType(notificationType string) ([]*typ
 		notificationType, len(apiResp.Data), readCount, seenMessageCount, len(newNotifications))
 
 	if readCount > 0 {
-		logger.Debugf("ld246 %s 通知: 跳过了 %d 条已读消息", notificationType, readCount)
+		logger.Infof("ld246 %s 通知: 跳过了 %d 条已读消息", notificationType, readCount)
 	}
 	if seenMessageCount > 0 {
-		logger.Debugf("ld246 %s 通知: 跳过了 %d 条已见过的消息", notificationType, seenMessageCount)
+		logger.Infof("ld246 %s 通知: 跳过了 %d 条已见过的消息", notificationType, seenMessageCount)
 	}
 	logger.Infof("ld246 %s 通知: 返回 %d 条新未读消息（共 %d 条未读消息）", notificationType, len(newNotifications), len(apiResp.Data)-readCount)
+
+	return newNotifications, nil
+}
+
+// fetchComment2edNotifications 获取收到的评论消息（comment2ed API 的数据结构与其他通知类型不同）
+func (m *Ld246Monitor) fetchComment2edNotifications() ([]*types.Notification, error) {
+	url := fmt.Sprintf("%s/api/v2/notifications/comment2ed?p=1", m.baseURL)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	// 如果提供了 token，添加到请求头（使用 token 格式，而非 Bearer）
+	if m.token != "" {
+		req.Header.Set("Authorization", "token "+m.token)
+	}
+	req.Header.Set("User-Agent", "NotifyMe/1.0")
+
+	resp, err := m.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 检查状态码
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, fmt.Errorf("需要登录，请设置有效的 API Token")
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("权限不足")
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API 返回错误状态码 %d: %s", resp.StatusCode, string(body))
+	}
+
+	// 读取响应体内容用于日志记录
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取响应体失败: %w", err)
+	}
+
+	// 记录原始响应内容（用于调试）
+	logger.Debugf("ld246 comment2ed 通知 API 响应内容: %s", string(bodyBytes))
+
+	var apiResp struct {
+		Code int `json:"code"`
+		Data struct {
+			Pagination struct {
+				PaginationPageCount int   `json:"paginationPageCount"`
+				PaginationPageNums  []int `json:"paginationPageNums"`
+			} `json:"pagination"`
+			Comment2edNotifications []struct {
+				DataID          string `json:"dataId"`          // 关联数据 ID
+				AuthorName      string `json:"authorName"`      // 作者名称
+				AuthorAvatarURL string `json:"authorAvatarURL"` // 作者头像 URL
+				DataType        int    `json:"dataType"`        // 数据类型
+				HasRead         bool   `json:"hasRead"`         // 是否已读
+				Title           string `json:"title"`           // 标题
+				Content         string `json:"content"`         // 内容
+			} `json:"comment2edNotifications"`
+			UnreadNotificationCount struct {
+				UnreadComment2edNotificationCnt int `json:"unreadComment2edNotificationCnt"`
+			} `json:"unreadNotificationCount"`
+		} `json:"data"`
+		Msg string `json:"msg"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &apiResp); err != nil {
+		logger.Errorf("ld246 comment2ed 通知响应解析失败，原始响应: %s", string(bodyBytes))
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if apiResp.Code != 0 {
+		return nil, fmt.Errorf("API 返回错误: %s", apiResp.Msg)
+	}
+
+	logger.Infof("ld246 comment2ed 通知: API 返回 %d 条消息", len(apiResp.Data.Comment2edNotifications))
+
+	// 对比已见过的消息，只返回新的未读消息
+	m.seenMessagesMu.RLock()
+	seenCount := len(m.seenMessages)
+	logger.Infof("ld246 comment2ed 通知: 当前已见过 %d 条消息", seenCount)
+
+	newNotifications := make([]*types.Notification, 0)
+	newMessageIDs := make([]string, 0)
+	readCount := 0
+	seenMessageCount := 0
+
+	for i, item := range apiResp.Data.Comment2edNotifications {
+		// 使用 dataId 作为消息 ID（因为 comment2ed 类型的通知没有单独的 id 字段）
+		messageID := fmt.Sprintf("comment2ed_%s_%s", item.DataID, item.AuthorName)
+		logger.Infof("ld246 comment2ed 通知: 处理第 %d 条消息，DataID=%s, AuthorName=%s, HasRead=%v, Content=%s",
+			i+1, item.DataID, item.AuthorName, item.HasRead, truncateString(item.Content, 50))
+
+		// 只处理未读消息
+		if item.HasRead {
+			readCount++
+			logger.Infof("ld246 comment2ed 通知: 消息 DataID=%s 已读，跳过", item.DataID)
+			continue
+		}
+
+		// 检查是否已见过
+		if m.seenMessages[messageID] {
+			seenMessageCount++
+			logger.Infof("ld246 comment2ed 通知: 消息 DataID=%s (messageID=%s) 已见过，跳过",
+				item.DataID, messageID)
+			continue
+		}
+
+		logger.Infof("ld246 comment2ed 通知: 发现新消息 DataID=%s (messageID=%s)",
+			item.DataID, messageID)
+
+		// 限制内容长度（移除 HTML 标签）
+		content := truncateString(stripHTML(item.Content), 100)
+		if content == "" {
+			content = "收到评论"
+		}
+
+		// 构建标题
+		title := "收到评论"
+		if item.AuthorName != "" {
+			title = fmt.Sprintf("收到评论（来自 %s）", item.AuthorName)
+		}
+
+		// 根据 dataType 构建链接
+		link := m.baseURL
+		if item.DataID != "" {
+			// comment2ed 类型的 dataType 通常是 40，表示评论
+			// dataId 是评论的 ID，需要构建到对应文章的链接
+			// 这里简化处理，直接使用 dataId 构建链接（可能需要根据实际情况调整）
+			link = fmt.Sprintf("%s/article/%s", m.baseURL, item.DataID)
+		}
+
+		notification := &types.Notification{
+			ID:      fmt.Sprintf("ld246_comment2ed_%s", messageID),
+			Title:   title,
+			Content: content,
+			Link:    link,
+			Source:  "ld246",
+			Time:    time.Now().UnixMilli(), // comment2ed 类型没有 createdTime 字段，使用当前时间
+		}
+		newNotifications = append(newNotifications, notification)
+		newMessageIDs = append(newMessageIDs, messageID)
+	}
+	m.seenMessagesMu.RUnlock()
+
+	// 更新已见过的消息 ID 列表
+	if len(newMessageIDs) > 0 {
+		m.seenMessagesMu.Lock()
+		for _, id := range newMessageIDs {
+			m.seenMessages[id] = true
+		}
+		m.seenMessagesMu.Unlock()
+
+		// 保存到文件
+		m.saveSeenMessages()
+	}
+
+	logger.Infof("ld246 comment2ed 通知: 统计 - 总消息数=%d, 已读消息=%d, 已见过消息=%d, 新消息=%d",
+		len(apiResp.Data.Comment2edNotifications), readCount, seenMessageCount, len(newNotifications))
+
+	if readCount > 0 {
+		logger.Infof("ld246 comment2ed 通知: 跳过了 %d 条已读消息", readCount)
+	}
+	if seenMessageCount > 0 {
+		logger.Infof("ld246 comment2ed 通知: 跳过了 %d 条已见过的消息", seenMessageCount)
+	}
+	logger.Infof("ld246 comment2ed 通知: 返回 %d 条新未读消息（共 %d 条未读消息）", len(newNotifications), len(apiResp.Data.Comment2edNotifications)-readCount)
 
 	return newNotifications, nil
 }
