@@ -53,22 +53,25 @@ func onReady() {
 		for {
 			select {
 			case <-menuOpenUI.ClickedCh:
-				logger.Info("点击打开界面菜单项")
+				logger.Info("收到打开界面菜单项点击事件")
 				if onOpenUI != nil {
 					// 在 goroutine 中调用，避免阻塞事件循环
+					// 使用独立的 goroutine 确保事件处理不会被阻塞
 					go func() {
 						defer func() {
 							if r := recover(); r != nil {
 								logger.Errorf("打开界面时发生错误: %v", r)
 							}
 						}()
+						logger.Debug("开始执行打开界面回调")
 						onOpenUI()
+						logger.Debug("打开界面回调执行完成")
 					}()
 				} else {
 					logger.Warn("打开界面回调未设置")
 				}
 			case <-menuQuit.ClickedCh:
-				logger.Info("点击退出菜单项")
+				logger.Info("收到退出菜单项点击事件")
 				if onQuit != nil {
 					// 在 goroutine 中调用，避免阻塞事件循环
 					go func() {
@@ -79,9 +82,11 @@ func onReady() {
 								systray.Quit()
 							}
 						}()
+						logger.Debug("开始执行退出回调")
 						onQuit()
 						// onQuit 会调用 app.Quit()，app.Quit() 内部会调用 tray.Quit()
 						// 所以这里不需要再次调用 systray.Quit()
+						logger.Debug("退出回调执行完成")
 					}()
 				} else {
 					logger.Warn("退出回调未设置，直接退出托盘")

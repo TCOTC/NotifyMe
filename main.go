@@ -66,6 +66,8 @@ func main() {
 			}
 			// 否则隐藏窗口而不是退出，让程序在后台运行
 			runtime.WindowHide(ctx)
+			// 更新窗口可见状态
+			app.SetWindowVisible(false)
 			return true // 返回 true 阻止窗口关闭
 		},
 		Bind: []interface{}{

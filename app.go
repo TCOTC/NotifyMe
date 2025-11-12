@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"notifyme/internal/config"
@@ -17,12 +18,14 @@ import (
 
 // App struct
 type App struct {
-	ctx        context.Context
-	ctxMu      sync.RWMutex
-	config     *types.Config
-	scheduler  *scheduler.Scheduler
-	shouldQuit bool         // 标志是否应该退出程序
-	quitMu     sync.RWMutex // 保护 shouldQuit 的互斥锁
+	ctx           context.Context
+	ctxMu         sync.RWMutex
+	config        *types.Config
+	scheduler     *scheduler.Scheduler
+	shouldQuit    bool         // 标志是否应该退出程序
+	quitMu        sync.RWMutex // 保护 shouldQuit 的互斥锁
+	showingWindow int32        // 原子标志，表示是否正在显示窗口（0=否，1=是）
+	windowVisible int32        // 原子标志，表示窗口是否可见（0=隐藏，1=显示）
 }
 
 // NewApp creates a new App application struct
@@ -85,6 +88,8 @@ func (a *App) startup(ctx context.Context) {
 	a.ctxMu.Lock()
 	a.ctx = ctx
 	a.ctxMu.Unlock()
+	// 应用启动时，窗口默认是可见的
+	atomic.StoreInt32(&a.windowVisible, 1)
 	logger.Info("应用启动完成")
 }
 
@@ -135,22 +140,125 @@ func (a *App) TriggerCheck() {
 
 // ShowWindow 显示窗口
 func (a *App) ShowWindow() {
+	// 快速检查窗口是否已经可见，如果已经可见，只执行必要的操作（如置前）
+	// 这样可以避免重复执行可能导致阻塞的操作
+	if atomic.LoadInt32(&a.windowVisible) == 1 {
+		logger.Debug("窗口已经可见，只执行置前操作")
+		// 窗口已经可见，只尝试将窗口置前，不执行其他操作
+		// 在独立的 goroutine 中执行，不阻塞
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Debugf("窗口置前操作失败: %v", r)
+				}
+			}()
+			a.ctxMu.RLock()
+			ctx := a.ctx
+			a.ctxMu.RUnlock()
+			if ctx != nil {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					// 只执行置前操作，不执行 WindowShow 等可能阻塞的操作
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								logger.Debugf("WindowCenter 不可用: %v", r)
+							}
+						}()
+						runtime.WindowCenter(ctx)
+					}()
+				}
+			}
+		}()
+		return
+	}
+
+	// 使用原子操作快速检查是否正在显示窗口，避免重复调用
+	// 如果正在执行，直接返回，不阻塞
+	if !atomic.CompareAndSwapInt32(&a.showingWindow, 0, 1) {
+		logger.Debug("窗口正在显示中，跳过重复调用")
+		return
+	}
+
+	// 确保在函数退出时重置标志
+	defer atomic.StoreInt32(&a.showingWindow, 0)
+
+	logger.Debug("ShowWindow 被调用")
+
 	a.ctxMu.RLock()
 	ctx := a.ctx
 	a.ctxMu.RUnlock()
 
-	if ctx != nil {
+	if ctx == nil {
+		logger.Warn("无法显示窗口：context 未初始化，可能窗口已关闭或应用未完全启动")
+		return
+	}
+
+	// 检查 context 是否已取消（窗口可能已被关闭）
+	select {
+	case <-ctx.Done():
+		logger.Warn("无法显示窗口：context 已取消，窗口可能已被关闭")
+		return
+	default:
+		// context 仍然有效，继续执行
+	}
+
+	// 在 goroutine 中执行窗口操作，避免阻塞调用者
+	// 不等待操作完成，立即返回，确保托盘事件处理不被阻塞
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Errorf("显示窗口操作发生 panic: %v", r)
+				atomic.StoreInt32(&a.showingWindow, 0)
+			}
+		}()
+
 		// 使用 defer recover 捕获可能的 panic
 		defer func() {
 			if r := recover(); r != nil {
 				logger.Errorf("显示窗口时发生错误: %v", r)
 			}
 		}()
+
+		// 先显示窗口
 		runtime.WindowShow(ctx)
-		logger.Info("显示主窗口")
-	} else {
-		logger.Warn("无法显示窗口：context 未初始化，可能窗口已关闭或应用未完全启动")
-	}
+		logger.Debug("WindowShow 调用完成")
+		atomic.StoreInt32(&a.windowVisible, 1)
+
+		// 如果窗口被最小化，恢复窗口
+		// 注意：WindowUnminimise 在某些平台上可能不可用，使用 recover 捕获可能的错误
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					// WindowUnminimise 可能不可用，忽略错误
+					logger.Debugf("WindowUnminimise 不可用: %v", r)
+				}
+			}()
+			runtime.WindowUnminimise(ctx)
+			logger.Debug("WindowUnminimise 调用完成")
+		}()
+
+		// 将窗口置于前台并获取焦点
+		// 注意：WindowCenter 和 WindowFocus 在某些平台上可能不可用
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					// 这些方法可能不可用，忽略错误
+					logger.Debugf("窗口焦点操作不可用: %v", r)
+				}
+			}()
+			runtime.WindowCenter(ctx)
+			logger.Debug("WindowCenter 调用完成")
+		}()
+
+		atomic.StoreInt32(&a.showingWindow, 0)
+		logger.Info("显示主窗口成功")
+	}()
+
+	// 不等待操作完成，立即返回，确保托盘事件处理不被阻塞
+	logger.Debug("ShowWindow 调用已启动，异步执行中")
 }
 
 // HideWindow 隐藏窗口
@@ -161,7 +269,17 @@ func (a *App) HideWindow() {
 
 	if ctx != nil {
 		runtime.WindowHide(ctx)
+		atomic.StoreInt32(&a.windowVisible, 0)
 		logger.Info("隐藏主窗口")
+	}
+}
+
+// SetWindowVisible 设置窗口可见状态（供外部调用，如 OnBeforeClose）
+func (a *App) SetWindowVisible(visible bool) {
+	if visible {
+		atomic.StoreInt32(&a.windowVisible, 1)
+	} else {
+		atomic.StoreInt32(&a.windowVisible, 0)
 	}
 }
 
