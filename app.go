@@ -140,36 +140,50 @@ func (a *App) TriggerCheck() {
 
 // ShowWindow 显示窗口
 func (a *App) ShowWindow() {
-	// 快速检查窗口是否已经可见，如果已经可见，只执行必要的操作（如置前）
+	// 快速检查窗口是否已经可见，如果已经可见，只执行必要的操作（如取消最小化、置前）
 	// 这样可以避免重复执行可能导致阻塞的操作
 	if atomic.LoadInt32(&a.windowVisible) == 1 {
-		logger.Debug("窗口已经可见，只执行置前操作")
-		// 窗口已经可见，只尝试将窗口置前，不执行其他操作
+		logger.Debug("窗口已经可见，检查是否需要取消最小化并置前")
+		// 窗口已经可见，检查是否最小化，如果最小化则取消最小化，然后置前
 		// 在独立的 goroutine 中执行，不阻塞
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Debugf("窗口置前操作失败: %v", r)
+					logger.Debugf("窗口操作失败: %v", r)
 				}
 			}()
 			a.ctxMu.RLock()
 			ctx := a.ctx
 			a.ctxMu.RUnlock()
-			if ctx != nil {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-					// 只执行置前操作，不执行 WindowShow 等可能阻塞的操作
-					func() {
-						defer func() {
-							if r := recover(); r != nil {
-								logger.Debugf("WindowCenter 不可用: %v", r)
-							}
-						}()
-						runtime.WindowCenter(ctx)
+			if ctx == nil {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				// 先取消最小化（如果窗口被最小化）
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							// WindowUnminimise 可能不可用，忽略错误
+							logger.Debugf("WindowUnminimise 不可用: %v", r)
+						}
 					}()
-				}
+					runtime.WindowUnminimise(ctx)
+					logger.Debug("WindowUnminimise 调用完成（窗口已可见时）")
+				}()
+
+				// 然后执行置前操作
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							logger.Debugf("WindowCenter 不可用: %v", r)
+						}
+					}()
+					runtime.WindowCenter(ctx)
+					logger.Debug("WindowCenter 调用完成（窗口已可见时）")
+				}()
 			}
 		}()
 		return

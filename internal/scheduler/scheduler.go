@@ -189,6 +189,8 @@ func (s *Scheduler) checkLd246() {
 			s.addNotifications(messages)
 		}
 	}
+
+	logger.Info("ld246 检查完成")
 }
 
 // checkGitHub 检查 GitHub 新通知
@@ -198,6 +200,7 @@ func (s *Scheduler) checkGitHub() {
 	notifications, err := s.githubMonitor.FetchNotifications()
 	if err != nil {
 		logger.Errorf("获取 GitHub 通知失败: %v", err)
+		logger.Info("GitHub 检查完成")
 		return
 	}
 
@@ -206,6 +209,8 @@ func (s *Scheduler) checkGitHub() {
 		s.notifier.NotifyBatch(notifications)
 		s.addNotifications(notifications)
 	}
+
+	logger.Info("GitHub 检查完成")
 }
 
 // addNotifications 添加通知到最近通知列表（插入到顶部，最多保留 50 条）
