@@ -322,10 +322,16 @@ func (m *Ld246Monitor) FetchRecentReplies() ([]*types.Notification, error) {
 		isNew := false
 
 		if !exists {
-			// 新帖子
+			// 新出现的帖子
 			isNew = true
-			newArticleCount++
-			logger.Debugf("ld246: 发现新帖子 ID=%s, 标题=%s", item.OID, item.ArticleTitle)
+			// 如果回帖数为 0，说明是新帖子；如果已有回帖，说明是有新回帖
+			if item.ArticleCommentCount == 0 {
+				newArticleCount++
+				logger.Debugf("ld246: 发现新帖子 ID=%s, 标题=%s", item.OID, item.ArticleTitle)
+			} else {
+				updatedArticleCount++
+				logger.Debugf("ld246: 发现新出现的帖子但已有回帖 ID=%s, 标题=%s, 回帖数=%d", item.OID, item.ArticleTitle, item.ArticleCommentCount)
+			}
 		} else {
 			// 检查是否有新回帖（更新时间或评论数变化）
 			if timeValue > seenState.LastUpdateTime || item.ArticleCommentCount > seenState.CommentCount {
@@ -362,9 +368,11 @@ func (m *Ld246Monitor) FetchRecentReplies() ([]*types.Notification, error) {
 
 		// 构建通知标题
 		title := item.ArticleTitle
-		// 如果回帖数为 0，说明是新帖子，而不是"有新回帖"
-		isNewPost := !exists || (exists && item.ArticleCommentCount == 0)
-		hasNewReply := exists && item.ArticleCommentCount > 0 && (timeValue > seenState.LastUpdateTime || item.ArticleCommentCount > seenState.CommentCount)
+		// 判断是新帖子还是有新回帖
+		// 新帖子：回帖数为 0（无论是新出现还是已存在）
+		// 有新回帖：新出现但已有回帖，或已存在且回帖数 > 0 且有变化
+		isNewPost := item.ArticleCommentCount == 0
+		hasNewReply := !isNewPost && isNew
 		if isNewPost {
 			title = fmt.Sprintf("新帖: %s", item.ArticleTitle)
 		} else if hasNewReply {
