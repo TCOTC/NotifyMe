@@ -153,4 +153,6 @@ NotifyMe/
 
 - [Wails](https://wails.io/) - 用于构建跨平台桌面应用
 - [Vite](https://vitejs.dev/) - 前端构建工具
+- [社区客户端 API 文档 - 链滴](https://ld246.com/article/1488603534762)
+- [通知的 REST API 终结点 - GitHub 文档](https://docs.github.com/zh/rest/activity/notifications?apiVersion=2022-11-28)
 
